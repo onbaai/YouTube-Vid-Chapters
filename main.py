@@ -1,11 +1,117 @@
 import os
-from flask import Flask
+from flask import Flask, jsonify
+from flask_cors import CORS
+from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
+import google.generativeai as genai
+from google.cloud import secretmanager
+
+# Create the Secret Manager client
+client = secretmanager.SecretManagerServiceClient()
+
+# Construct the secret name (replace with your project ID and secret name)
+project_id = os.environ.get("GOOGLE_CLOUD_PROJECT")  # Get project ID from env
+secret_name = "GEMINI_API_KEY"
+name = f"projects/{project_id}/secrets/{secret_name}/versions/latest"
+
+# Access the secret (do this outside your request handling functions)
+try:
+    response = client.access_secret_version(name=name)
+    GEMINI_API_KEY = response.payload.data.decode("UTF-8")
+except:
+    raise ValueError("GEMINI_API_KEY environment variable not set.")
+
+def initialize_gemini(key):
+    # Initialize Gemini model
+    genai.configure(api_key=key)
+
+    # Generation Configuration (Optional)
+    generation_config = {
+        "temperature": 0.2,
+        "top_p": 0.9,
+        "top_k": 20,
+        "max_output_tokens": 8192,  # Adjust as needed
+    }
+
+    generation_config_structured_data = {
+    "temperature": 1,
+    "top_p": 0.95,
+    "top_k": 40,
+    "max_output_tokens": 8192,
+    "response_mime_type": "application/json",
+    }
+
+    # Pre-configure Gemini agents with their roles
+
+    return genai.GenerativeModel(
+        model_name="models/gemini-1.5-flash-8b",
+        system_instruction="""
+        Role: Expert content analyzer, focused on extracting the most impactful and relevant insights from the provided input.
+        Goal: Main Goal: Minimize time spent on extracting the most impactful and relevant insights from the provided input by at least 66%.
+        Task: Analyze the transcript of a video and create optimal number of chapter segments of the content and assess their significance.
+        Use the following categories and corresponding colors for the assessment:
+
+        1.  Very Significant chapter (darkgreen): Crucial, insights that summarize key points, most important part of the content
+        2.	Significant chapter (green): Important but non-critical content that provides a meaningful information.
+        3.	Insignificant chapter (yellow): “Skippable, redundant, slow-paced, or low-value content if you’re short on time, as it offers minimal informational benefit.”
+        4.	Out of Topic chapter (grey): “Skippable, irrelevant content that deviates from the main topic.
+        5.	Promotional chapter (red): Skippable advertisements, sponsorships, or any form of self-promotion.
+
+        ### Instructions:
+        1. Analyze the entire transcript thoroughly to understand the context and main topic.
+        2. Divide the transcript into effective chapter segments.
+        3. For each segment, assign one of the above categories based on its significance, generate a short easy to understand chapter name, and a short form (max 2 sentence) chapter summary.
+        4. Output the results in the following format only:
+            { start: <Start time>, end: <End time>, color: <Color>, chapter: <Chapter name>, summary: <Chapter summary> },
+            Example output: [{start: 0, end: 5, color: 'yellow', chapter: 'Intro', summary: 'Intro music'}, { start: 5, end: 75, color: 'darkgreen', chapter: 'Thinking in Systems by Donella Meadows', summary: 'Superior business strategy guide compared to common self-help books' }, ...]
+        5. Ensure the output is consistent and accurately reflects the significance of each segment.
+        User will only read/watch the parts you labeled as darkgreen and green. Other colors will be skipped.
+        Max 20% of the labels can be darkgreen, and max 50% of the labels can be green.
+
+        Analyze the provided transcript from beginning to end and generate the output as instructed.
+        Return the resulting list without any additional commentary or additions.
+        DO NOT ADD ANY <\n> OR ANY OTHER ESCAPE SEQUENCE
+        """,
+        generation_config=generation_config_structured_data,
+    )
+
+agent = initialize_gemini(GEMINI_API_KEY)
 
 app = Flask(__name__)
 
+# Enable CORS for all routes
+CORS(app,
+     resources={
+         r"/*": {
+             "origins": ["https://www.youtube.com", "chrome-extension://*"],
+             "methods": ["GET"],
+             "allow_headers": ["Content-Type"]
+         }
+     })
+
+@app.route('/<video_id>')
+def get_video_chapters(video_id):
+    res = chapters(video_id)
+
+    return jsonify({"result": res})
+
 @app.route("/")
 def hello_world():
-    return "Hello, World! This is a Python web server on Google Cloud Run."
+    return "YouTube Vid Chapters"
+
+def chapters(video_id):
+    transcript = YouTubeTranscriptApi.get_transcript(video_id)
+    chapters = ai_chapters(transcript)
+    return chapters
+
+def ai_chapters(transcript):
+    prompt = f"""Transcript:{transcript}"""
+
+    try:
+        response = agent.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        print(f"Error calling Gemini API: {e}")
+        raise
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
