@@ -24,13 +24,6 @@ except:
 genai.configure(api_key=GEMINI_API_KEY)
 
 # Generation Configuration
-generation_config = {
-    "temperature": 0.2,
-    "top_p": 0.9,
-    "top_k": 20,
-    "max_output_tokens": 8192,  # Adjust as needed
-}
-
 generation_config_structured_data = {
     "temperature": 1,
     "top_p": 0.95,
@@ -42,7 +35,10 @@ generation_config_structured_data = {
 # Pre-configure Gemini agent with their role
 agent = genai.GenerativeModel(
     model_name="models/gemini-1.5-flash-8b",
-    system_instruction="""
+    generation_config=generation_config_structured_data,
+    )
+
+agent.system_instruction = """
     Role: Expert content analyzer, focused on extracting the most impactful and relevant insights from the provided input.
     Goal: Main Goal: Minimize time spent on extracting the most impactful and relevant insights from the provided input by at least 66%.
     Task: Analyze the transcript of a video and create optimal number of chapter segments of the content and assess their significance.
@@ -68,9 +64,7 @@ agent = genai.GenerativeModel(
     Analyze the provided transcript from beginning to end and generate the output as instructed.
     Return the resulting list without any additional commentary or additions.
     DO NOT ADD ANY <\n> OR ANY OTHER ESCAPE SEQUENCE
-    """,
-    generation_config=generation_config_structured_data,
-    )
+    """
 
 app = Flask(__name__)
 
