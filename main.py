@@ -80,7 +80,7 @@ CORS(app,
 
 @app.route('/<video_id>')
 def get_video_chapters(video_id):
-    res = chapters(video_id)
+    res = chapters(str(video_id))
 
     return jsonify({"result": res})
 
