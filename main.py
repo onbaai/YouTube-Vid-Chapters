@@ -20,61 +20,57 @@ try:
 except:
     raise ValueError("GEMINI_API_KEY environment variable not set.")
 
-def initialize_gemini(key):
-    # Initialize Gemini model
-    genai.configure(api_key=key)
+# Initialize Gemini model
+genai.configure(api_key=GEMINI_API_KEY)
 
-    # Generation Configuration (Optional)
-    generation_config = {
-        "temperature": 0.2,
-        "top_p": 0.9,
-        "top_k": 20,
-        "max_output_tokens": 8192,  # Adjust as needed
-    }
+# Generation Configuration
+generation_config = {
+    "temperature": 0.2,
+    "top_p": 0.9,
+    "top_k": 20,
+    "max_output_tokens": 8192,  # Adjust as needed
+}
 
-    generation_config_structured_data = {
+generation_config_structured_data = {
     "temperature": 1,
     "top_p": 0.95,
     "top_k": 40,
     "max_output_tokens": 8192,
     "response_mime_type": "application/json",
-    }
+}
 
-    # Pre-configure Gemini agents with their roles
+# Pre-configure Gemini agent with their role
+agent = genai.GenerativeModel(
+    model_name="models/gemini-1.5-flash-8b",
+    system_instruction="""
+    Role: Expert content analyzer, focused on extracting the most impactful and relevant insights from the provided input.
+    Goal: Main Goal: Minimize time spent on extracting the most impactful and relevant insights from the provided input by at least 66%.
+    Task: Analyze the transcript of a video and create optimal number of chapter segments of the content and assess their significance.
+    Use the following categories and corresponding colors for the assessment:
 
-    return genai.GenerativeModel(
-        model_name="models/gemini-1.5-flash-8b",
-        system_instruction="""
-        Role: Expert content analyzer, focused on extracting the most impactful and relevant insights from the provided input.
-        Goal: Main Goal: Minimize time spent on extracting the most impactful and relevant insights from the provided input by at least 66%.
-        Task: Analyze the transcript of a video and create optimal number of chapter segments of the content and assess their significance.
-        Use the following categories and corresponding colors for the assessment:
+    1.  Very Significant chapter (darkgreen): Crucial, insights that summarize key points, most important part of the content
+    2.	Significant chapter (green): Important but non-critical content that provides a meaningful information.
+    3.	Insignificant chapter (yellow): “Skippable, redundant, slow-paced, or low-value content if you’re short on time, as it offers minimal informational benefit.”
+    4.	Out of Topic chapter (grey): “Skippable, irrelevant content that deviates from the main topic.
+    5.	Promotional chapter (red): Skippable advertisements, sponsorships, or any form of self-promotion.
 
-        1.  Very Significant chapter (darkgreen): Crucial, insights that summarize key points, most important part of the content
-        2.	Significant chapter (green): Important but non-critical content that provides a meaningful information.
-        3.	Insignificant chapter (yellow): “Skippable, redundant, slow-paced, or low-value content if you’re short on time, as it offers minimal informational benefit.”
-        4.	Out of Topic chapter (grey): “Skippable, irrelevant content that deviates from the main topic.
-        5.	Promotional chapter (red): Skippable advertisements, sponsorships, or any form of self-promotion.
+    ### Instructions:
+    1. Analyze the entire transcript thoroughly to understand the context and main topic.
+    2. Divide the transcript into effective chapter segments.
+    3. For each segment, assign one of the above categories based on its significance, generate a short easy to understand chapter name, and a short form (max 2 sentence) chapter summary.
+    4. Output the results in the following format only:
+        { start: <Start time>, end: <End time>, color: <Color>, chapter: <Chapter name>, summary: <Chapter summary> },
+        Example output: [{start: 0, end: 5, color: 'yellow', chapter: 'Intro', summary: 'Intro music'}, { start: 5, end: 75, color: 'darkgreen', chapter: 'Thinking in Systems by Donella Meadows', summary: 'Superior business strategy guide compared to common self-help books' }, ...]
+    5. Ensure the output is consistent and accurately reflects the significance of each segment.
+    User will only read/watch the parts you labeled as darkgreen and green. Other colors will be skipped.
+    Max 20% of the labels can be darkgreen, and max 50% of the labels can be green.
 
-        ### Instructions:
-        1. Analyze the entire transcript thoroughly to understand the context and main topic.
-        2. Divide the transcript into effective chapter segments.
-        3. For each segment, assign one of the above categories based on its significance, generate a short easy to understand chapter name, and a short form (max 2 sentence) chapter summary.
-        4. Output the results in the following format only:
-            { start: <Start time>, end: <End time>, color: <Color>, chapter: <Chapter name>, summary: <Chapter summary> },
-            Example output: [{start: 0, end: 5, color: 'yellow', chapter: 'Intro', summary: 'Intro music'}, { start: 5, end: 75, color: 'darkgreen', chapter: 'Thinking in Systems by Donella Meadows', summary: 'Superior business strategy guide compared to common self-help books' }, ...]
-        5. Ensure the output is consistent and accurately reflects the significance of each segment.
-        User will only read/watch the parts you labeled as darkgreen and green. Other colors will be skipped.
-        Max 20% of the labels can be darkgreen, and max 50% of the labels can be green.
-
-        Analyze the provided transcript from beginning to end and generate the output as instructed.
-        Return the resulting list without any additional commentary or additions.
-        DO NOT ADD ANY <\n> OR ANY OTHER ESCAPE SEQUENCE
-        """,
-        generation_config=generation_config_structured_data,
+    Analyze the provided transcript from beginning to end and generate the output as instructed.
+    Return the resulting list without any additional commentary or additions.
+    DO NOT ADD ANY <\n> OR ANY OTHER ESCAPE SEQUENCE
+    """,
+    generation_config=generation_config_structured_data,
     )
-
-agent = initialize_gemini(GEMINI_API_KEY)
 
 app = Flask(__name__)
 
