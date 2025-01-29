@@ -10,18 +10,23 @@ client = secretmanager.SecretManagerServiceClient()
 
 # Construct the secret name (replace with your project ID and secret name)
 project_id = os.environ.get("GOOGLE_CLOUD_PROJECT")  # Get project ID from env
+print("Project ID Found.")
 secret_name = "GEMINI_API_KEY"
 name = f"projects/{project_id}/secrets/{secret_name}/versions/latest"
 
 # Access the secret (do this outside your request handling functions)
+print("Accessing Secret:")
 try:
     response = client.access_secret_version(name=name)
     GEMINI_API_KEY = response.payload.data.decode("UTF-8")
+    print("Key Found.")
 except:
     raise ValueError("GEMINI_API_KEY environment variable not set.")
 
 # Initialize Gemini model
+print("Agent Initialization:")
 genai.configure(api_key=GEMINI_API_KEY)
+print("Agent Initialized.")
 
 # Generation Configuration
 generation_config_structured_data = {
@@ -33,11 +38,14 @@ generation_config_structured_data = {
 }
 
 # Pre-configure Gemini agent with their role
+print("Agent Configuration:")
 agent = genai.GenerativeModel(
     model_name="models/gemini-1.5-flash-8b",
     generation_config=generation_config_structured_data,
     )
+print("Agent Configuration Done.")
 
+print("System Instructions:")
 agent.system_instruction = """
     Role: Expert content analyzer, focused on extracting the most impactful and relevant insights from the provided input.
     Goal: Main Goal: Minimize time spent on extracting the most impactful and relevant insights from the provided input by at least 66%.
@@ -65,8 +73,10 @@ agent.system_instruction = """
     Return the resulting list without any additional commentary or additions.
     DO NOT ADD ANY <\n> OR ANY OTHER ESCAPE SEQUENCE
     """
+print("System Instructions Set.")
 
 app = Flask(__name__)
+print("Flask up and running.")
 
 # Enable CORS for all routes
 CORS(app,
@@ -80,16 +90,19 @@ CORS(app,
 
 @app.route('/<video_id>')
 def get_video_chapters(video_id):
-    res = chapters(str(video_id))
+    print(f"Video ID: {video_id}")
+    result = chapters(str(video_id))
 
-    return jsonify({"result": res})
+    return jsonify({"result": result})
 
 @app.route("/")
 def hello_world():
     return "YouTube Vid Chapters"
 
 def chapters(video_id):
+    print("Getting Transcript.")
     transcript = YouTubeTranscriptApi.get_transcript(video_id)
+    print("Transcript received.")
     chapters = ai_chapters(transcript)
     return chapters
 
@@ -97,7 +110,9 @@ def ai_chapters(transcript):
     prompt = f"""Transcript:{transcript}"""
 
     try:
+        print("Generating Content.")
         response = agent.generate_content(prompt)
+        print("Generated.")
         return response.text
     except Exception as e:
         print(f"Error calling Gemini API: {e}")
