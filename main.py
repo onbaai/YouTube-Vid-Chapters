@@ -3,6 +3,7 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 import google.generativeai as genai
 from google.cloud import secretmanager
+import json
 
 # Create the Secret Manager client
 client = secretmanager.SecretManagerServiceClient()
@@ -73,17 +74,25 @@ print("Agent Configuration Done.")
 print("System Instructions Set.")
 
 def ai_chapters(transcript):
-    prompt = f"""Transcript:{transcript}"""
+    prompt = f"""Transcript:{transcript}
+    Analyze this transcript and create chapter segments as specified in the instructions. Return only the JSON array of chapters."""
 
     try:
         print("Generating Content.")
         response = agent.generate_content(prompt)
         print("Generated.")
-        return response.text
+        
+        # Parse the response text as JSON to avoid double encoding
+        try:
+            chapters = json.loads(response.text)
+            return chapters  # Return the parsed JSON directly
+        except json.JSONDecodeError as e:
+            print(f"Error parsing Gemini response as JSON: {e}")
+            return response.text  # Fallback to raw text if parsing fails
+            
     except Exception as e:
         print(f"Error calling Gemini API: {e}")
         raise
-
 
 app = Flask(__name__)
 print("Flask up and running.")
@@ -109,11 +118,13 @@ def process_transcript():
         transcript = data['transcript']
         chapters = ai_chapters(transcript)
         
-        # Return the chapters directly
-        return jsonify({"result": chapters})
+        # Since chapters is already parsed JSON, jsonify will handle it properly
+        return jsonify({"result": chapters})  # This will create a clean JSON response
+        
     except Exception as e:
         print(f"Error processing transcript: {e}")
         return jsonify({"error": str(e)}), 500
+
 
 @app.route("/")
 def hello_world():
