@@ -1,21 +1,19 @@
 import os
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from flask_cors import CORS
-from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
 import google.generativeai as genai
 from google.cloud import secretmanager
-
 
 # Create the Secret Manager client
 client = secretmanager.SecretManagerServiceClient()
 
-# Construct the secret name (replace with your project ID and secret name)
-project_id = os.environ.get("GOOGLE_CLOUD_PROJECT")  # Get project ID from env
+# Construct the secret name
+project_id = os.environ.get("GOOGLE_CLOUD_PROJECT")
 print("Project ID Found.")
 secret_name = "GEMINI_API_KEY"
 name = f"projects/{project_id}/secrets/{secret_name}/versions/latest"
 
-# Access the secret (do this outside your request handling functions)
+# Access the secret
 print("Accessing Secret:")
 try:
     response = client.access_secret_version(name=name)
@@ -38,12 +36,12 @@ generation_config_structured_data = {
     "response_mime_type": "application/json",
 }
 
-# Pre-configure Gemini agent with their role
+# Pre-configure Gemini agent
 print("Agent Configuration:")
 agent = genai.GenerativeModel(
     model_name="models/gemini-1.5-flash-8b",
     generation_config=generation_config_structured_data,
-    )
+)
 print("Agent Configuration Done.")
 
 print("System Instructions:")
@@ -55,8 +53,8 @@ agent.system_instruction = """
 
     1.  Very Significant chapter (darkgreen): Crucial, insights that summarize key points, most important part of the content
     2.	Significant chapter (green): Important but non-critical content that provides a meaningful information.
-    3.	Insignificant chapter (yellow): “Skippable, redundant, slow-paced, or low-value content if you’re short on time, as it offers minimal informational benefit.”
-    4.	Out of Topic chapter (grey): “Skippable, irrelevant content that deviates from the main topic.
+    3.	Insignificant chapter (yellow): "Skippable, redundant, slow-paced, or low-value content if you're short on time, as it offers minimal informational benefit."
+    4.	Out of Topic chapter (grey): "Skippable, irrelevant content that deviates from the main topic.
     5.	Promotional chapter (red): Skippable advertisements, sponsorships, or any form of self-promotion.
 
     ### Instructions:
@@ -84,62 +82,28 @@ CORS(app,
      resources={
          r"/*": {
              "origins": ["https://www.youtube.com", "chrome-extension://*"],
-             "methods": ["GET"],
+             "methods": ["POST"],  # Changed from GET to POST
              "allow_headers": ["Content-Type"]
          }
      })
 
-@app.route('/<video_id>')
-def get_video_chapters(video_id):
-    print(f"Video ID: {video_id}")
-    result = chapters(str(video_id))
-
-    return jsonify({"result": result})
+@app.route('/process_transcript', methods=['POST'])
+def process_transcript():
+    try:
+        data = request.get_json()
+        if not data or 'transcript' not in data:
+            return jsonify({"error": "No transcript provided"}), 400
+        
+        transcript = data['transcript']
+        result = ai_chapters(transcript)
+        return jsonify({"result": result})
+    except Exception as e:
+        print(f"Error processing transcript: {e}")
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/")
 def hello_world():
     return "YouTube Vid Chapters"
-
-def chapters(video_id):
-    print("Getting Transcript.")
-    transcript = YouTubeTranscriptApi.get_transcript(video_id)
-    print("Transcript received.")
-    chapters = ai_chapters(transcript)
-    return chapters
-
-def chapters(video_id):
-    print("Getting Transcript.")
-    try:
-        # Add headers to mimic a browser request
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Accept-Language': 'en-US,en;q=0.9',
-        }
-        
-        # Create a custom HTTP client configuration
-        http_client = {
-            'headers': headers
-        }
-        
-        transcript = YouTubeTranscriptApi.get_transcript(
-            video_id,
-            proxies=None,
-            cookies=None,
-            http_client=http_client
-        )
-        print("Transcript received.")
-        chapters = ai_chapters(transcript)
-        return chapters
-    except TranscriptsDisabled:
-        print(f"Transcripts are disabled for video {video_id}")
-        return {"error": "Transcripts are disabled for this video"}
-    except NoTranscriptFound:
-        print(f"No transcript found for video {video_id}")
-        return {"error": "No transcript found for this video"}
-    except Exception as e:
-        print(f"Error getting transcript: {e}")
-        return {"error": f"Failed to get transcript: {str(e)}"}
-
 
 def ai_chapters(transcript):
     prompt = f"""Transcript:{transcript}"""

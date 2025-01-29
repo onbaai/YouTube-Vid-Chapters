@@ -1,6 +1,5 @@
 flask
 flask-cors
-youtube-transcript-api
 google-generativeai
 google-cloud-secret-manager
 python-dotenv
