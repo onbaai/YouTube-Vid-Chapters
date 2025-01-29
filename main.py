@@ -5,6 +5,7 @@ from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, No
 import google.generativeai as genai
 from google.cloud import secretmanager
 
+
 # Create the Secret Manager client
 client = secretmanager.SecretManagerServiceClient()
 
@@ -105,6 +106,40 @@ def chapters(video_id):
     print("Transcript received.")
     chapters = ai_chapters(transcript)
     return chapters
+
+def chapters(video_id):
+    print("Getting Transcript.")
+    try:
+        # Add headers to mimic a browser request
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept-Language': 'en-US,en;q=0.9',
+        }
+        
+        # Create a custom HTTP client configuration
+        http_client = {
+            'headers': headers
+        }
+        
+        transcript = YouTubeTranscriptApi.get_transcript(
+            video_id,
+            proxies=None,
+            cookies=None,
+            http_client=http_client
+        )
+        print("Transcript received.")
+        chapters = ai_chapters(transcript)
+        return chapters
+    except TranscriptsDisabled:
+        print(f"Transcripts are disabled for video {video_id}")
+        return {"error": "Transcripts are disabled for this video"}
+    except NoTranscriptFound:
+        print(f"No transcript found for video {video_id}")
+        return {"error": "No transcript found for this video"}
+    except Exception as e:
+        print(f"Error getting transcript: {e}")
+        return {"error": f"Failed to get transcript: {str(e)}"}
+
 
 def ai_chapters(transcript):
     prompt = f"""Transcript:{transcript}"""
