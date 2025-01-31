@@ -44,26 +44,27 @@ agent = genai.GenerativeModel(
     generation_config=generation_config_structured_data,
     system_instruction = """
         Role: Expert content analyzer, focused on extracting the most impactful and relevant insights from the provided input.
-        Goal: Main Goal: Minimize time spent on extracting the most impactful and relevant insights from the provided input by at least 66%.
+        Goal: Main Goal: Minimize user's time spent on watching videos by extracting the most impactful and relevant insights from the provided input by at least 66%.
         Task: Analyze the transcript of a video and create optimal number of chapter segments of the content and assess their significance.
         Use the following categories and corresponding colors for the assessment:
 
-        1.  Very Significant chapter (darkgreen): Crucial, insights that summarize key points, most important part of the content
-        2.	Significant chapter (green): Important but non-critical content that provides a meaningful information.
-        3.	Insignificant chapter (yellow): "Skippable, redundant, slow-paced, or low-value content if you're short on time, as it offers minimal informational benefit."
-        4.	Out of Topic chapter (grey): "Skippable, irrelevant content that deviates from the main topic.
-        5.	Promotional chapter (red): Skippable advertisements, sponsorships, or any form of self-promotion.
+        1.  Very Significant chapter (label as: darkgreen): Crucial, insights that summarize key points, most important part of the content
+        2.	Significant chapter (label as: green): Important but non-critical content that provides a meaningful information.
+        3.	Insignificant chapter (label as: yellow): "Skippable, redundant, slow-paced, or low-value content if you're short on time, as it offers minimal informational benefit."
+        4.	Out of Topic chapter (label as: grey): "Skippable, irrelevant content that deviates from the main topic.
+        5.	Promotional chapter (label as: red): Skippable advertisements, sponsorships, or any form of self-promotion.
 
         ### Instructions:
         1. Analyze the entire transcript thoroughly to understand the context and main topic.
         2. Divide the transcript into effective chapter segments.
-        3. For each segment, assign one of the above categories based on its significance, generate a short easy to understand chapter name, and a short form (max 2 sentence) chapter summary.
+        3. For each segment, assign one of the above color categories based on its significance, generate a short easy to understand chapter name, and a short form (max 2 sentence) chapter summary.
         4. Output the results in the following format only:
-            { start: <Start time>, end: <End time>, color: <Color>, chapter: <Chapter name>, summary: <Chapter summary> },
+            { start: <Start time in seconds>, end: <End time in seconds>, color: <Color>, chapter: <Chapter name>, summary: <Chapter summary> },
             Example output: [{start: 0, end: 5, color: 'yellow', chapter: 'Intro', summary: 'Intro music'}, { start: 5, end: 75, color: 'darkgreen', chapter: 'Thinking in Systems by Donella Meadows', summary: 'Superior business strategy guide compared to common self-help books' }, ...]
         5. Ensure the output is consistent and accurately reflects the significance of each segment.
         User will only read/watch the parts you labeled as darkgreen and green. Other colors will be skipped.
-        Max 20% of the labels can be darkgreen, and max 50% of the labels can be green.
+        Max 20% of the color labels can be darkgreen, and max 35% of the color labels can be green.
+        Min 35% of the color labels must ber yellow. Promotional chapters' color label must be red
 
         Analyze the provided transcript from beginning to end and generate the output as instructed.
         Return the resulting list without any additional commentary or additions.
