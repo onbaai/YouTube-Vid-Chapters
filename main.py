@@ -203,7 +203,7 @@ def process_video_id():
         video_id=video_id,
         timestamp=datetime.now(timezone.utc),
         ai_content=ai_content,
-        text_transcript=transcript
+        transcript=transcript
     )
     session.add(new_video)
     session.commit()
