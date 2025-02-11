@@ -160,7 +160,7 @@ def ai_chapters(transcript):
         print(f"Error calling Gemini API: {e}")
         raise
 
-def check_video_id(video_id):
+def check_video(video_id):
     """Check if video_id exists in Firestore."""
     video_ref = db.collection('videos').document(video_id)
     video_doc = video_ref.get()
@@ -226,7 +226,7 @@ def check_video_id():
         print(f"Cache Hit for Video: {video_id}")
         return jsonify({"result": cached_result})
 
-    video_data = check_video_id(video_id)
+    video_data = check_video(video_id)
     if video_data:
         return jsonify({"result": json.loads(video_data["ai_content"])})
     else:
