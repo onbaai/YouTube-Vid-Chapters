@@ -152,11 +152,12 @@ def update_cache_with_top_videos():
         cache.set(video_id, ai_content)  # Cache the AI content
         print(f"Cached video_id: {video_id}")
 
-    print(f"Cache updated with {len(top_videos)} videos.")
+    print(f"Cache Updated With {len(top_videos)} Videos.")
 
 # Schedule the task to run every 15 minutes
 scheduler.add_job(update_cache_with_top_videos, 'interval', minutes=15)
 scheduler.start()
+print("Scheduler Started.")
 
 def ai_chapters(transcript):
     prompt = f"""Transcript:{transcript}
@@ -170,6 +171,7 @@ def ai_chapters(transcript):
         # Parse the response text as JSON to avoid double encoding
         try:
             chapters = json.loads(response.text)
+            print("AI Content Created")
             return chapters  # Return the parsed JSON directly
         except json.JSONDecodeError as e:
             print(f"Error parsing Gemini response as JSON: {e}")
@@ -180,7 +182,7 @@ def ai_chapters(transcript):
         raise
 
 app = Flask(__name__)
-print("Flask up and running.")
+print("Flask Up and Running.")
 
 # Enable CORS for all routes
 CORS(app,
@@ -211,13 +213,13 @@ def check_video_id():
     # Check the cache first
     cached_result = cache.get(video_id)
     if cached_result:
-        print(f"Cache hit for video_id: {video_id}")
+        print(f"Cache Hit for Video: {video_id}")
         return jsonify({"result": cached_result})
 
     # Check the database
     video = session.query(Video).filter_by(video_id=video_id).first()
     if video:
-        print(f"Database hit for video_id: {video_id}")
+        print(f"Database Hit for Video: {video_id}")
         # Increment access frequency
         video.frequency += 1
         session.commit()
@@ -262,6 +264,7 @@ def process_video():
     )
     session.add(new_video)
     session.commit()
+    print("DB Record added")
 
     # Return the generated content
     return jsonify({"result": chapters}), 201
@@ -274,7 +277,6 @@ if __name__ == "__main__":
     
     # Start the scheduler
     scheduler.start()
-    print("Scheduler started.")
     
     # Run the Flask app
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
