@@ -1,6 +1,7 @@
 import os
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+from flask_caching import Cache
 import google.generativeai as genai
 from google.cloud import secretmanager
 import json
@@ -8,6 +9,7 @@ from sqlalchemy import create_engine, Column, String, Integer, DateTime, Text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime, timezone
+from apscheduler.schedulers.background import BackgroundScheduler
 
 
 # Create the Secret Manager client
@@ -28,6 +30,8 @@ try:
 except:
     raise ValueError("GEMINI_API_KEY environment variable not set.")
 
+# Initialize the scheduler
+scheduler = BackgroundScheduler()
 
 # Database setup
 print("Database Setup:")
@@ -126,6 +130,34 @@ agent = genai.GenerativeModel(
 print("Agent Configuration Done.")
 print("System Instructions Set.")
 
+def update_cache_with_top_videos():
+    """
+    Update the cache with the top 30% of the highest frequency video_ids.
+    """
+    print("Updating cache with top 30% videos...")
+    # Query all videos sorted by frequency in descending order
+    all_videos = session.query(Video).order_by(Video.frequency.desc()).all()
+
+    # Calculate the number of videos to cache (top 30%)
+    total_videos = len(all_videos)
+    top_videos_count = max(1, int(total_videos * 0.3))  # Ensure at least 1 video is cached
+
+    # Select the top 30% videos
+    top_videos = all_videos[:top_videos_count]
+
+    # Update the cache with these videos
+    for video in top_videos:
+        video_id = video.video_id
+        ai_content = json.loads(video.ai_content)
+        cache.set(video_id, ai_content)  # Cache the AI content
+        print(f"Cached video_id: {video_id}")
+
+    print(f"Cache updated with {len(top_videos)} videos.")
+
+# Schedule the task to run every 15 minutes
+scheduler.add_job(update_cache_with_top_videos, 'interval', minutes=15)
+scheduler.start()
+
 def ai_chapters(transcript):
     prompt = f"""Transcript:{transcript}
     Analyze this transcript and create chapter segments as specified in the instructions. Return only the JSON array of chapters."""
@@ -160,45 +192,68 @@ CORS(app,
          }
      })
 
-#Degisecek kisim   
-@app.route('/video_id', methods=['GET'])
+# Configure caching
+cache = Cache(app, config={'CACHE_TYPE': 'SimpleCache', 'CACHE_DEFAULT_TIMEOUT': 900})  # 15-minute timeout
+
+@app.route('/check_video_id', methods=['GET'])
 def check_video_id():
-    """Check if video_id exists in the database."""
+    """
+    Check if video_id exists in the cache or database.
+    - If found in the cache, return the cached AI content.
+    - If found in the database but not in the cache, return the stored AI content and cache it.
+    - If not found, return a 404 error.
+    """
+    # Get the video_id from query parameters
     video_id = request.args.get('video_id')
     if not video_id:
         return jsonify({"error": "Missing video_id parameter"}), 400
-    
+
+    # Check the cache first
+    cached_result = cache.get(video_id)
+    if cached_result:
+        print(f"Cache hit for video_id: {video_id}")
+        return jsonify({"result": cached_result})
+
+    # Check the database
     video = session.query(Video).filter_by(video_id=video_id).first()
     if video:
-        video.frequency += 1  # Increment access frequency
+        print(f"Database hit for video_id: {video_id}")
+        # Increment access frequency
+        video.frequency += 1
         session.commit()
-        return jsonify({"result": json.loads(video.ai_content)})
-    else:
-        return jsonify({"error": "Video ID not found"}), 404
 
-@app.route('/video_id', methods=['POST'])
-def process_video_id():
-    """Process new video_id and transcript, generate chapters, and store in the database."""
+        # Parse the AI content from the database
+        ai_content = json.loads(video.ai_content)
+
+        return jsonify({"result": ai_content})
+
+    # If the video_id is not found in the cache or database
+    return jsonify({"error": "Video ID not found"}), 404
+  
+@app.route('/process_video', methods=['POST'])
+def process_video():
+    """
+    Process a video request and generate AI content, store it, and return it.
+    """
+    # Parse the incoming JSON data
     data = request.get_json()
     video_id = data.get('video_id')
     transcript = data.get('transcript')
-    
-    if not video_id or not transcript:
-        return jsonify({"error": "Missing video_id or transcript"}), 400
-    
-    # Check if video_id already exists
-    existing_video = session.query(Video).filter_by(video_id=video_id).first()
-    if existing_video:
-        return jsonify({"error": "Video ID already exists"}), 409
-    
+
+    # Validate input
+    if not video_id:
+        return jsonify({"error": "Missing video_id"}), 400
+    if not transcript:
+        return jsonify({"error": "Missing transcript for new video_id"}), 400
+
     # Generate chapters using AI
     try:
         chapters = ai_chapters(transcript)
         ai_content = json.dumps(chapters)  # Convert chapters to JSON string for storage
     except Exception as e:
         return jsonify({"error": f"Failed to generate chapters: {str(e)}"}), 500
-    
-    # Store in database
+
+    # Store the new video entry in the database
     new_video = Video(
         video_id=video_id,
         timestamp=datetime.now(timezone.utc),
@@ -207,31 +262,19 @@ def process_video_id():
     )
     session.add(new_video)
     session.commit()
-    
-    return jsonify({"message": "Video processed successfully", "result": chapters}), 201
 
-
-@app.route('/process_transcript', methods=['POST'])
-def process_transcript():
-    try:
-        data = request.get_json()
-        if not data or 'transcript' not in data:
-            return jsonify({"error": "No transcript provided"}), 400
-        
-        transcript = data['transcript']
-        chapters = ai_chapters(transcript)
-        
-        # Since chapters is already parsed JSON, jsonify will handle it properly
-        return jsonify({"result": chapters})  # This will create a clean JSON response
-        
-    except Exception as e:
-        print(f"Error processing transcript: {e}")
-        return jsonify({"error": str(e)}), 500
-
+    # Return the generated content
+    return jsonify({"result": chapters}), 201
 
 @app.route("/")
 def hello_world():
     return "YouTube Video Chapters"
 
 if __name__ == "__main__":
+    
+    # Start the scheduler
+    scheduler.start()
+    print("Scheduler started.")
+    
+    # Run the Flask app
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
