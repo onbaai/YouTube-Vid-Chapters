@@ -4,10 +4,8 @@ from flask_cors import CORS
 from flask_caching import Cache
 import google.generativeai as genai
 from google.cloud import secretmanager
+from google.cloud import firestore
 import json
-from sqlalchemy import create_engine, Column, String, Integer, DateTime, Text
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
 from datetime import datetime, timezone
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -33,30 +31,9 @@ except:
 # Initialize the scheduler
 scheduler = BackgroundScheduler()
 
-# Database setup
-print("Database Setup:")
-DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///videos.db")  # Default to SQLite
-engine = create_engine(DATABASE_URL)
-Base = declarative_base()
-Session = sessionmaker(bind=engine)
-session = Session()
-
-class Video(Base):
-    __tablename__ = "videos"
-    
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    video_id = Column(String, unique=True, nullable=False)
-    timestamp = Column(DateTime, default=datetime.now(timezone.utc))  # Default to current time
-    frequency = Column(Integer, default=1)  # How often this video has been accessed
-    ai_content = Column(Text, nullable=False)  # JSON string of chapters
-    transcript = Column(Text, nullable=False)  # Text transcript info
-    likes = Column(Integer, default=0)
-    dislikes = Column(Integer, default=0)
-    version = Column(String, default=1)
-
-# Create tables
-Base.metadata.create_all(engine)
-print("Database Setup Done.")
+# Initialize Firestore client
+db = firestore.Client()
+print("Firestore Initialized.")
 
 # Initialize Gemini model
 print("Agent Initialization:")
@@ -134,9 +111,9 @@ def update_cache_with_top_videos():
     """
     Update the cache with the top 30% of the highest frequency video_ids.
     """
-    print("Updating cache with top 30% videos...")
+    print("Updating cache with top 30% videos")
     # Query all videos sorted by frequency in descending order
-    all_videos = session.query(Video).order_by(Video.frequency.desc()).all()
+    all_videos = get_all_videos()
 
     # Calculate the number of videos to cache (top 30%)
     total_videos = len(all_videos)
@@ -145,12 +122,14 @@ def update_cache_with_top_videos():
     # Select the top 30% videos
     top_videos = all_videos[:top_videos_count]
 
+    # Clear the cache before updating
+    cache.clear()
+
     # Update the cache with these videos
     for video in top_videos:
-        video_id = video.video_id
-        ai_content = json.loads(video.ai_content)
+        video_id = video["video_id"]
+        ai_content = json.loads(video["ai_content"])
         cache.set(video_id, ai_content)  # Cache the AI content
-        print(f"Cached video_id: {video_id}")
 
     print(f"Cache Updated With {len(top_videos)} Videos.")
 
@@ -181,6 +160,36 @@ def ai_chapters(transcript):
         print(f"Error calling Gemini API: {e}")
         raise
 
+def check_video_id(video_id):
+    """Check if video_id exists in Firestore."""
+    video_ref = db.collection('videos').document(video_id)
+    video_doc = video_ref.get()
+    if video_doc.exists:
+        video_data = video_doc.to_dict()
+        # Increment frequency
+        video_ref.update({"frequency": firestore.Increment(1)})
+        return video_data
+    return None
+
+def store_video(video_id, ai_content, transcript):
+    """Store a new video in Firestore."""
+    video_ref = db.collection('videos').document(video_id)
+    video_ref.set({
+        "video_id": video_id,
+        "timestamp": datetime.now(timezone.utc),
+        "frequency": 1,
+        "ai_content": ai_content,
+        "transcript": transcript,
+        "likes": 0,
+        "dislikes": 0,
+        "version": 1
+    })
+
+def get_all_videos():
+    """Retrieve all videos from Firestore."""
+    videos = db.collection('videos').order_by("frequency", direction=firestore.Query.DESCENDING).stream()
+    return [doc.to_dict() for doc in videos]
+
 app = Flask(__name__)
 print("Flask Up and Running.")
 
@@ -207,6 +216,7 @@ def check_video_id():
     """
     # Get the video_id from query parameters
     video_id = request.args.get('video_id')
+
     if not video_id:
         return jsonify({"error": "Missing video_id parameter"}), 400
 
@@ -216,21 +226,12 @@ def check_video_id():
         print(f"Cache Hit for Video: {video_id}")
         return jsonify({"result": cached_result})
 
-    # Check the database
-    video = session.query(Video).filter_by(video_id=video_id).first()
-    if video:
-        print(f"Database Hit for Video: {video_id}")
-        # Increment access frequency
-        video.frequency += 1
-        session.commit()
-
-        # Parse the AI content from the database
-        ai_content = json.loads(video.ai_content)
-
-        return jsonify({"result": ai_content})
-
-    # If the video_id is not found in the cache or database
-    return jsonify({"error": "Video ID not found"}), 404
+    video_data = check_video_id(video_id)
+    if video_data:
+        return jsonify({"result": json.loads(video_data["ai_content"])})
+    else:
+        return jsonify({"error": "Video ID not found"}), 404
+  
   
 @app.route('/process_video', methods=['POST'])
 def process_video():
@@ -255,18 +256,9 @@ def process_video():
     except Exception as e:
         return jsonify({"error": f"Failed to generate chapters: {str(e)}"}), 500
 
-    # Store the new video entry in the database
-    new_video = Video(
-        video_id=video_id,
-        timestamp=datetime.now(timezone.utc),
-        ai_content=ai_content,
-        transcript=transcript
-    )
-    session.add(new_video)
-    session.commit()
-    print("DB Record added")
+    # Store in Firestore
+    store_video(video_id, ai_content, transcript)
 
-    # Return the generated content
     return jsonify({"result": chapters}), 201
 
 @app.route("/")
