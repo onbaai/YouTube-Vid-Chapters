@@ -4,3 +4,4 @@ google-generativeai
 google-cloud-secret-manager
 python-dotenv
 werkzeug
+sqlalchemy

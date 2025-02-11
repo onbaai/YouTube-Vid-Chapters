@@ -4,6 +4,11 @@ from flask_cors import CORS
 import google.generativeai as genai
 from google.cloud import secretmanager
 import json
+from sqlalchemy import create_engine, Column, String, Integer, DateTime, Text
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+from datetime import datetime, timezone
+
 
 # Create the Secret Manager client
 client = secretmanager.SecretManagerServiceClient()
@@ -22,6 +27,32 @@ try:
     print("Key Found.")
 except:
     raise ValueError("GEMINI_API_KEY environment variable not set.")
+
+
+# Database setup
+print("Database Setup:")
+DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///videos.db")  # Default to SQLite
+engine = create_engine(DATABASE_URL)
+Base = declarative_base()
+Session = sessionmaker(bind=engine)
+session = Session()
+
+class Video(Base):
+    __tablename__ = "videos"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    video_id = Column(String, unique=True, nullable=False)
+    timestamp = Column(DateTime, default=datetime.now(timezone.utc))  # Default to current time
+    frequency = Column(Integer, default=1)  # How often this video has been accessed
+    ai_content = Column(Text, nullable=False)  # JSON string of chapters
+    transcript = Column(Text, nullable=False)  # Text transcript info
+    likes = Column(Integer, default=0)
+    dislikes = Column(Integer, default=0)
+    version = Column(String, default=1)
+
+# Create tables
+Base.metadata.create_all(engine)
+print("Database Setup Done.")
 
 # Initialize Gemini model
 print("Agent Initialization:")
@@ -129,7 +160,57 @@ CORS(app,
          }
      })
 
-   
+#Degisecek kisim   
+@app.route('/video_id', methods=['GET'])
+def check_video_id():
+    """Check if video_id exists in the database."""
+    video_id = request.args.get('video_id')
+    if not video_id:
+        return jsonify({"error": "Missing video_id parameter"}), 400
+    
+    video = session.query(Video).filter_by(video_id=video_id).first()
+    if video:
+        video.frequency += 1  # Increment access frequency
+        session.commit()
+        return jsonify({"result": json.loads(video.ai_content)})
+    else:
+        return jsonify({"error": "Video ID not found"}), 404
+
+@app.route('/video_id', methods=['POST'])
+def process_video_id():
+    """Process new video_id and transcript, generate chapters, and store in the database."""
+    data = request.get_json()
+    video_id = data.get('video_id')
+    transcript = data.get('transcript')
+    
+    if not video_id or not transcript:
+        return jsonify({"error": "Missing video_id or transcript"}), 400
+    
+    # Check if video_id already exists
+    existing_video = session.query(Video).filter_by(video_id=video_id).first()
+    if existing_video:
+        return jsonify({"error": "Video ID already exists"}), 409
+    
+    # Generate chapters using AI
+    try:
+        chapters = ai_chapters(transcript)
+        ai_content = json.dumps(chapters)  # Convert chapters to JSON string for storage
+    except Exception as e:
+        return jsonify({"error": f"Failed to generate chapters: {str(e)}"}), 500
+    
+    # Store in database
+    new_video = Video(
+        video_id=video_id,
+        timestamp=datetime.now(timezone.utc),
+        ai_content=ai_content,
+        text_transcript=transcript
+    )
+    session.add(new_video)
+    session.commit()
+    
+    return jsonify({"message": "Video processed successfully", "result": chapters}), 201
+
+
 @app.route('/process_transcript', methods=['POST'])
 def process_transcript():
     try:
@@ -150,7 +231,7 @@ def process_transcript():
 
 @app.route("/")
 def hello_world():
-    return "YouTube Vid Chapters"
+    return "YouTube Video Chapters"
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
